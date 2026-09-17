@@ -450,8 +450,16 @@ class MainViewModel(
                 FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
             }
 
+            val mime = when {
+                task.mimeType.isNotBlank() -> task.mimeType
+                task.mediaType == MediaType.VIDEO -> "video/*"
+                task.mediaType == MediaType.AUDIO -> "audio/*"
+                task.mediaType == MediaType.PHOTO -> "image/*"
+                else -> "*/*"
+            }
+
             val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, task.mimeType.ifBlank { "*/*" })
+                setDataAndType(uri, mime)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
@@ -469,8 +477,16 @@ class MainViewModel(
                 FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
             }
 
+            val mime = when {
+                task.mimeType.isNotBlank() -> task.mimeType
+                task.mediaType == MediaType.VIDEO -> "video/*"
+                task.mediaType == MediaType.AUDIO -> "audio/*"
+                task.mediaType == MediaType.PHOTO -> "image/*"
+                else -> "*/*"
+            }
+
             val intent = Intent(Intent.ACTION_SEND).apply {
-                type = task.mimeType.ifBlank { "*/*" }
+                type = mime
                 putExtra(Intent.EXTRA_STREAM, uri)
                 putExtra(Intent.EXTRA_TEXT, "${task.title} - Downloaded via ABDownloader")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

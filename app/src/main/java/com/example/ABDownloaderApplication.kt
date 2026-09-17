@@ -54,8 +54,9 @@ class ABDownloaderApplication : Application() {
         DownloadNotificationHelper.createNotificationChannel(this)
         AdMobManager.initialize(this)
 
-        // Silent once-per-day check on launch
+        // Silent once-per-day check on launch and clean orphaned staging files
         CoroutineScope(Dispatchers.IO).launch {
+            com.example.storage.MediaStorageHelper.cleanStagingDirectory(this@ABDownloaderApplication)
             updateManager.checkOnLaunchSilently()
         }
     }

@@ -87,6 +87,14 @@ class DownloadEngine(
                 if (task.filePath.isNotBlank()) {
                     MediaStorageHelper.deletePhysicalFile(context, task.filePath)
                 }
+                // Clean up any pending or partial staging files associated with this task
+                try {
+                    val sanitizedTitle = task.title.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(50).ifBlank { "media" }
+                    val stagingDir = MediaStorageHelper.getStagingDirectory(context)
+                    stagingDir.listFiles { _, name -> name.contains(sanitizedTitle) }?.forEach {
+                        it.delete()
+                    }
+                } catch (_: Exception) {}
                 repository.deleteTask(taskId, task.playlistId)
             }
             if (activeJobs.isEmpty()) {
@@ -158,9 +166,9 @@ class DownloadEngine(
                 }
                 MediaStorageHelper.finalizeMediaStoreItem(context, targetPathOrUri)
             } else {
-                // Real Video/Audio download via YoutubeDL
-                val targetDir = MediaStorageHelper.getTargetMediaFolder(task.mediaType)
-                val templateFile = File(targetDir, "AB_${sanitizedTitle}_${System.currentTimeMillis()}.%(ext)s")
+                // Real Video/Audio download via YoutubeDL staged into private writable external storage
+                val privateStagingDir = MediaStorageHelper.getStagingDirectory(context)
+                val templateFile = File(privateStagingDir, "AB_${sanitizedTitle}_${System.currentTimeMillis()}.%(ext)s")
                 val request = YoutubeDLRequest(task.originalUrl)
                 request.addOption("-o", templateFile.absolutePath)
 
@@ -198,7 +206,8 @@ class DownloadEngine(
                         ?: if (etaInSeconds > 0) "ETA: ${etaInSeconds}s" else "${progress.toInt()}%"
 
                     // Extract destination if reported by yt-dlp
-                    val destMatch = Regex("\\[(?:download|ExtractAudio|ffmpeg|Merger)\\] Destination:\\s+(.+)").find(line)
+                    val destMatch = Regex("\\[(?:download|ExtractAudio|ffmpeg|Merger)\\] (?:Destination:|Merging formats into)\\s+\"?([^\"]+)\"?").find(line)
+                        ?: Regex("\\[(?:download|ExtractAudio|ffmpeg|Merger)\\] Destination:\\s+(.+)").find(line)
                     if (destMatch != null) {
                         detectedFilePath = destMatch.groupValues[1].trim()
                     }
@@ -222,10 +231,10 @@ class DownloadEngine(
                     }
                 }
 
-                // If yt-dlp didn't output Destination line, find the file created in targetDir
+                // If yt-dlp didn't output Destination line, find the file created in privateStagingDir
                 if (detectedFilePath.isBlank() || !File(detectedFilePath).exists()) {
-                    val matchingFiles = targetDir.listFiles { _, name ->
-                        name.startsWith("AB_${sanitizedTitle}_")
+                    val matchingFiles = privateStagingDir.listFiles { _, name ->
+                        name.startsWith("AB_${sanitizedTitle}_") && !name.endsWith(".part") && !name.endsWith(".ytdl")
                     }
                     val newest = matchingFiles?.maxByOrNull { it.lastModified() }
                     if (newest != null && newest.exists()) {
@@ -233,12 +242,33 @@ class DownloadEngine(
                     }
                 }
 
-                targetPathOrUri = detectedFilePath
-                val writtenFile = File(targetPathOrUri)
-                if (writtenFile.exists()) {
-                    totalBytes = writtenFile.length()
-                    MediaStorageHelper.scanMediaFile(context, targetPathOrUri, mimeType)
+                val stagedFile = File(detectedFilePath)
+                if (!stagedFile.exists()) {
+                    throw Exception("Downloaded file could not be found in staging directory")
                 }
+
+                totalBytes = stagedFile.length()
+                val actualExt = stagedFile.extension.lowercase()
+                val resolvedMimeType = when (actualExt) {
+                    "mp4" -> "video/mp4"
+                    "mkv" -> "video/x-matroska"
+                    "webm" -> if (task.mediaType == MediaType.AUDIO) "audio/webm" else "video/webm"
+                    "mp3" -> "audio/mpeg"
+                    "m4a" -> "audio/mp4"
+                    "opus" -> "audio/opus"
+                    "ogg" -> "audio/ogg"
+                    "wav" -> "audio/wav"
+                    "flac" -> "audio/flac"
+                    else -> mimeType
+                }
+
+                // Move finished file into public storage via MediaStore
+                targetPathOrUri = MediaStorageHelper.publishFileToMediaStore(
+                    context = context,
+                    sourceFile = stagedFile,
+                    mediaType = task.mediaType,
+                    mimeType = resolvedMimeType
+                )
             }
 
             // Update to completed
@@ -249,6 +279,7 @@ class DownloadEngine(
                 downloadedBytes = totalBytes,
                 totalBytes = totalBytes,
                 filePath = targetPathOrUri,
+                mimeType = if (task.mimeType.isNotBlank()) task.mimeType else mimeType,
                 completedAt = System.currentTimeMillis()
             )
             repository.updateTask(completedTask)
@@ -301,6 +332,7 @@ class DownloadEngine(
             )
         } finally {
             activeJobs.remove(task.id)
+            MediaStorageHelper.cleanStagingDirectory(context)
             if (activeJobs.isEmpty()) {
                 delay(1500)
                 if (activeJobs.isEmpty()) {
