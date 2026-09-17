@@ -1,0 +1,6 @@
+{
+  "name": "ABDownloader",
+  "description": "Universal video, audio, and photo downloader for YouTube and major social platforms with dual extraction engines, playlist support, and local history.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

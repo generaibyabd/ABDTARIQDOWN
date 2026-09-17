@@ -1,0 +1,33 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer rounded shield / container plate shadow -->
+    <path
+        android:fillColor="#25000000"
+        android:pathData="M32,27 L76,27 C81.5,27 86,31.5 86,37 L86,75 C86,80.5 81.5,85 76,85 L32,85 C26.5,85 22,80.5 22,75 L22,37 C22,31.5 26.5,27 32,27 Z" />
+    <!-- White rounded card representing media container -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M32,25 L76,25 C81.5,25 86,29.5 86,35 L86,73 C86,78.5 81.5,83 76,83 L32,83 C26.5,83 22,78.5 22,73 L22,35 C22,29.5 26.5,25 32,25 Z" />
+    <!-- Primary download arrow and playback triangle insignia in #3785D2 -->
+    <!-- Downward download arrow stem -->
+    <path
+        android:fillColor="#3785D2"
+        android:pathData="M50,33 L58,33 C59.1,33 60,33.9 60,35 L60,52 L66.5,52 C67.8,52 68.5,53.6 67.6,54.5 L55.1,67 C54.5,67.6 53.5,67.6 52.9,67 L40.4,54.5 C39.5,53.6 40.2,52 41.5,52 L48,52 L48,35 C48,33.9 48.9,33 50,33 Z" />
+    <!-- Download tray / cradle in #1B4F8A -->
+    <path
+        android:fillColor="#1A4A7A"
+        android:pathData="M36,68 L40,68 C41.1,68 42,68.9 42,70 C42,71.1 41.1,72 40,72 L36,72 C33.8,72 32,70.2 32,68 L32,60 C32,58.9 32.9,58 34,58 C35.1,58 36,58.9 36,60 L36,68 Z" />
+    <path
+        android:fillColor="#1A4A7A"
+        android:pathData="M72,68 L68,68 C66.9,68 66,68.9 66,70 C66,71.1 66.9,72 68,72 L72,72 C74.2,72 76,70.2 76,68 L76,60 C76,58.9 75.1,58 74,58 C72.9,58 72,58.9 72,60 L72,68 Z" />
+    <path
+        android:fillColor="#1A4A7A"
+        android:pathData="M38,72 L70,72 C71.1,72 72,72.9 72,74 C72,75.1 71.1,76 70,76 L38,76 C36.9,76 36,75.1 36,74 C36,72.9 36.9,72 38,72 Z" />
+    <!-- Top badge: AB letters or media dot -->
+    <path
+        android:fillColor="#3785D2"
+        android:pathData="M73,33 C74.65,33 76,34.35 76,36 C76,37.65 74.65,39 73,39 C71.35,39 70,37.65 70,36 C70,34.35 71.35,33 73,33 Z" />
+</vector>
