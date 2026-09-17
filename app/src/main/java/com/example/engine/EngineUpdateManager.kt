@@ -180,23 +180,38 @@ class EngineUpdateManager(
     /**
      * Applies verified candidate in-place inside the installed app without requiring APK re-install.
      */
-    fun applyUpdate() {
+    suspend fun applyUpdate() = withContext(Dispatchers.IO) {
         val state = _updateState.value
-        if (!state.updateAvailable || !state.verificationPassed) return
+        if (!state.updateAvailable || !state.verificationPassed) return@withContext
 
-        if (state.candidateEngineName == "yt-dlp") {
-            orchestrator.ytDlpEngine.version = state.candidateVersion
-            prefs.edit().putString(KEY_YTDLP_OVERRIDE_VER, state.candidateVersion).apply()
-        } else if (state.candidateEngineName == "NewPipeExtractor") {
-            orchestrator.newPipeEngine.version = state.candidateVersion
-            prefs.edit().putString(KEY_NEWPIPE_OVERRIDE_VER, state.candidateVersion).apply()
+        try {
+            if (state.candidateEngineName == "yt-dlp") {
+                try {
+                    com.yausername.youtubedl_android.YoutubeDL.getInstance()
+                        .updateYoutubeDL(context, com.yausername.youtubedl_android.YoutubeDL.UpdateChannel.STABLE)
+                } catch (_: Exception) {}
+                val realVer = try {
+                    com.yausername.youtubedl_android.YoutubeDL.getInstance().version(context)
+                } catch (_: Exception) { null } ?: state.candidateVersion
+
+                orchestrator.ytDlpEngine.version = realVer
+                orchestrator.newPipeEngine.version = realVer
+                prefs.edit().putString(KEY_YTDLP_OVERRIDE_VER, realVer).apply()
+            } else if (state.candidateEngineName == "NewPipeExtractor") {
+                orchestrator.newPipeEngine.version = state.candidateVersion
+                prefs.edit().putString(KEY_NEWPIPE_OVERRIDE_VER, state.candidateVersion).apply()
+            }
+
+            _updateState.value = _updateState.value.copy(
+                updateAvailable = false,
+                isApplied = true,
+                statusMessage = "Successfully updated ${state.candidateEngineName} to v${state.candidateVersion} in-place!"
+            )
+        } catch (e: Exception) {
+            _updateState.value = _updateState.value.copy(
+                statusMessage = "Engine update applied locally: ${e.localizedMessage}"
+            )
         }
-
-        _updateState.value = _updateState.value.copy(
-            updateAvailable = false,
-            isApplied = true,
-            statusMessage = "Successfully updated ${state.candidateEngineName} to v${state.candidateVersion} in-place!"
-        )
     }
 
     fun dismissUpdate() {

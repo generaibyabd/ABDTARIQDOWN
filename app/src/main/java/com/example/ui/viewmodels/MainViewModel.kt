@@ -274,6 +274,7 @@ class MainViewModel(
                     platform = media.platform.displayName,
                     mediaType = MediaType.PLAYLIST,
                     selectedQuality = quality,
+                    formatId = _selectedQualityOption.value?.id ?: "",
                     streamUrl = streamUrl,
                     status = TaskStatus.DOWNLOADING,
                     isPlaylistRoot = true,
@@ -294,6 +295,7 @@ class MainViewModel(
                         platform = media.platform.displayName,
                         mediaType = if (_selectedQualityOption.value?.isAudio == true) MediaType.AUDIO else MediaType.VIDEO,
                         selectedQuality = quality,
+                        formatId = _selectedQualityOption.value?.id ?: "",
                         streamUrl = item.url,
                         status = TaskStatus.QUEUED,
                         isPlaylistRoot = false,
@@ -316,6 +318,7 @@ class MainViewModel(
                         platform = media.platform.displayName,
                         mediaType = MediaType.PHOTO,
                         selectedQuality = "Original",
+                        formatId = photo.id,
                         streamUrl = photo.url,
                         status = TaskStatus.DOWNLOADING,
                         engineUsed = media.engineUsed
@@ -334,6 +337,7 @@ class MainViewModel(
                     platform = media.platform.displayName,
                     mediaType = if (quality.isAudio) MediaType.AUDIO else MediaType.VIDEO,
                     selectedQuality = quality.qualityLabel,
+                    formatId = quality.id,
                     streamUrl = quality.streamUrl.ifBlank { media.originalUrl },
                     status = TaskStatus.DOWNLOADING,
                     durationSeconds = media.durationSeconds,
@@ -488,7 +492,9 @@ class MainViewModel(
     }
 
     fun applyEngineUpdate() {
-        updateManager.applyUpdate()
+        viewModelScope.launch {
+            updateManager.applyUpdate()
+        }
     }
 
     fun dismissEngineUpdate() {

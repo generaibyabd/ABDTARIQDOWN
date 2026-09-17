@@ -21,6 +21,10 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    ndk {
+      abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+    }
   }
 
   signingConfigs {
@@ -55,6 +59,11 @@ android {
   buildFeatures {
     compose = true
     buildConfig = true
+  }
+  packaging {
+    jniLibs {
+      useLegacyPackaging = true
+    }
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
   dependenciesInfo {
@@ -102,6 +111,12 @@ dependencies {
   implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.play.services.ads)
   implementation(libs.converter.moshi)
+
+  // Real yt-dlp on-device extraction & download engine
+  implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+  implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
+  implementation("io.github.junkfood02.youtubedl-android:aria2c:0.18.1")
+
   // implementation(libs.firebase.ai)
   // Uncomment to use Firestore:
   // implementation(libs.firebase.firestore)

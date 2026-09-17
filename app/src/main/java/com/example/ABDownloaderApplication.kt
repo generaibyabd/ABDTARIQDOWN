@@ -35,6 +35,18 @@ class ABDownloaderApplication : Application() {
         database = AppDatabase.getInstance(this)
         repository = DownloadRepository(database.downloadDao(), database.historyDao())
         settingsManager = SettingsManager(this)
+
+        // Initialize real yt-dlp & FFmpeg engine
+        try {
+            com.yausername.youtubedl_android.YoutubeDL.getInstance().init(this)
+            com.yausername.ffmpeg.FFmpeg.getInstance().init(this)
+            try {
+                com.yausername.aria2c.Aria2c.getInstance().init(this)
+            } catch (_: Throwable) {}
+        } catch (e: Exception) {
+            android.util.Log.e("ABDownloader", "Failed to initialize yt-dlp engine", e)
+        }
+
         orchestrator = EngineOrchestrator()
         updateManager = EngineUpdateManager(this, orchestrator)
         downloadEngine = DownloadEngine(this, repository, settingsManager)

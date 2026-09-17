@@ -71,6 +71,27 @@ object MediaStorageHelper {
         return Pair(FileOutputStream(targetFile), targetFile.absolutePath)
     }
 
+    fun getTargetMediaFolder(mediaType: MediaType): File {
+        val subfolder = getSubfolderName(mediaType)
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val targetDir = File(downloadsDir, subfolder)
+        if (!targetDir.exists()) {
+            targetDir.mkdirs()
+        }
+        return targetDir
+    }
+
+    fun scanMediaFile(context: Context, filePath: String, mimeType: String) {
+        try {
+            android.media.MediaScannerConnection.scanFile(
+                context,
+                arrayOf(filePath),
+                arrayOf(mimeType),
+                null
+            )
+        } catch (_: Exception) {}
+    }
+
     /**
      * Marks pending file as complete in MediaStore so device media players and gallery index it.
      */

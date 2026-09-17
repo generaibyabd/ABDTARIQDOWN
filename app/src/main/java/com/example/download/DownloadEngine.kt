@@ -8,6 +8,8 @@ import com.example.data.db.TaskStatus
 import com.example.data.repository.DownloadRepository
 import com.example.settings.SettingsManager
 import com.example.storage.MediaStorageHelper
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
@@ -54,6 +57,9 @@ class DownloadEngine(
 
     fun pauseTask(taskId: String) {
         pausedTasks.add(taskId)
+        try {
+            YoutubeDL.getInstance().destroyProcessById(taskId)
+        } catch (_: Exception) {}
         activeJobs[taskId]?.cancel()
         activeJobs.remove(taskId)
         scope.launch {
@@ -70,6 +76,9 @@ class DownloadEngine(
 
     fun cancelTask(taskId: String) {
         pausedTasks.remove(taskId)
+        try {
+            YoutubeDL.getInstance().destroyProcessById(taskId)
+        } catch (_: Exception) {}
         activeJobs[taskId]?.cancel()
         activeJobs.remove(taskId)
         scope.launch {
@@ -106,7 +115,7 @@ class DownloadEngine(
 
         repository.updateTaskStatus(task.id, TaskStatus.DOWNLOADING)
 
-        val sanitizedTitle = task.title.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(50)
+        val sanitizedTitle = task.title.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(50).ifBlank { "media" }
         val ext = when (task.mediaType) {
             MediaType.AUDIO -> "mp3"
             MediaType.PHOTO -> "jpg"
@@ -119,72 +128,118 @@ class DownloadEngine(
             else -> "video/mp4"
         }
 
-        var outputStream: OutputStream? = null
-        var targetPathOrUri: String = task.filePath
-
         try {
-            if (targetPathOrUri.isBlank()) {
+            var targetPathOrUri = ""
+            var totalBytes = task.totalBytes
+
+            if (task.mediaType == MediaType.PHOTO) {
+                // Direct photo download via OkHttp streaming
                 val pair = MediaStorageHelper.createMediaOutputStream(
                     context,
                     fileName,
                     mimeType,
                     task.mediaType
                 )
-                outputStream = pair.first
+                val outputStream = pair.first ?: throw Exception("Could not allocate media storage for photo")
                 targetPathOrUri = pair.second
-                repository.updateTask(
-                    task.copy(
-                        status = TaskStatus.DOWNLOADING,
-                        filePath = targetPathOrUri,
-                        mimeType = mimeType
-                    )
-                )
-            } else {
-                val pair = MediaStorageHelper.createMediaOutputStream(
-                    context,
-                    fileName,
-                    mimeType,
-                    task.mediaType
-                )
-                outputStream = pair.first
-                targetPathOrUri = pair.second
-            }
 
-            if (outputStream == null) {
-                throw Exception("Could not allocate media output storage")
-            }
-
-            // Stream network download or simulated stream chunks
-            var downloadedBytes = task.downloadedBytes
-            var totalBytes = task.totalBytes.takeIf { it > 0 } ?: (45 * 1024 * 1024L)
-
-            val streamUrl = task.streamUrl
-            val isDirectHttp = streamUrl.startsWith("http://") || streamUrl.startsWith("https://")
-
-            if (isDirectHttp && !streamUrl.contains("watch?v=") && !streamUrl.contains("/p/")) {
-                val requestBuilder = Request.Builder().url(streamUrl)
-                if (downloadedBytes > 0) {
-                    requestBuilder.header("Range", "bytes=$downloadedBytes-")
-                }
-                val response = client.newCall(requestBuilder.build()).execute()
-                val body = response.body
-                if (response.isSuccessful && body != null) {
-                    val contentLength = body.contentLength()
-                    if (contentLength > 0) {
-                        totalBytes = downloadedBytes + contentLength
+                outputStream.use { os ->
+                    val request = Request.Builder().url(task.streamUrl).build()
+                    val response = client.newCall(request).execute()
+                    val body = response.body
+                    if (!response.isSuccessful || body == null) {
+                        throw Exception("HTTP ${response.code} downloading photo")
                     }
+                    val length = body.contentLength()
+                    if (length > 0) totalBytes = length
                     body.byteStream().use { input ->
-                        downloadStream(task, input, outputStream, downloadedBytes, totalBytes)
+                        downloadStream(task, input, os, 0L, totalBytes)
                     }
-                } else {
-                    fallbackSimulationDownload(task, outputStream, downloadedBytes, totalBytes)
                 }
+                MediaStorageHelper.finalizeMediaStoreItem(context, targetPathOrUri)
             } else {
-                fallbackSimulationDownload(task, outputStream, downloadedBytes, totalBytes)
-            }
+                // Real Video/Audio download via YoutubeDL
+                val targetDir = MediaStorageHelper.getTargetMediaFolder(task.mediaType)
+                val templateFile = File(targetDir, "AB_${sanitizedTitle}_${System.currentTimeMillis()}.%(ext)s")
+                val request = YoutubeDLRequest(task.originalUrl)
+                request.addOption("-o", templateFile.absolutePath)
 
-            // Finalize MediaStore entry so system players index it
-            MediaStorageHelper.finalizeMediaStoreItem(context, targetPathOrUri)
+                if (task.mediaType == MediaType.AUDIO) {
+                    if (task.formatId.isNotBlank() && task.formatId != "best" && task.formatId != "bestaudio") {
+                        request.addOption("-f", task.formatId)
+                    } else {
+                        request.addOption("-f", "bestaudio/best")
+                    }
+                    request.addOption("-x")
+                    request.addOption("--audio-format", "mp3")
+                    request.addOption("--audio-quality", "0")
+                } else {
+                    if (task.formatId.isNotBlank() && task.formatId != "best") {
+                        request.addOption("-f", "${task.formatId}+bestaudio/best/${task.formatId}")
+                    } else {
+                        request.addOption("-f", "bestvideo+bestaudio/best")
+                    }
+                }
+
+                var detectedFilePath = ""
+                var lastProgressTime = 0L
+
+                YoutubeDL.getInstance().execute(request, task.id) { progress, etaInSeconds, line ->
+                    if (!scope.isActive || pausedTasks.contains(task.id)) {
+                        try {
+                            YoutubeDL.getInstance().destroyProcessById(task.id)
+                        } catch (_: Exception) {}
+                        throw CancellationException()
+                    }
+
+                    // Extract speed from progress line
+                    val speedMatch = Regex("at\\s+([\\d.]+\\s*[KMG]i?B/s)").find(line)
+                    val speedText = speedMatch?.groupValues?.get(1)
+                        ?: if (etaInSeconds > 0) "ETA: ${etaInSeconds}s" else "${progress.toInt()}%"
+
+                    // Extract destination if reported by yt-dlp
+                    val destMatch = Regex("\\[(?:download|ExtractAudio|ffmpeg|Merger)\\] Destination:\\s+(.+)").find(line)
+                    if (destMatch != null) {
+                        detectedFilePath = destMatch.groupValues[1].trim()
+                    }
+
+                    val now = System.currentTimeMillis()
+                    if (now - lastProgressTime >= 400 || progress >= 100f) {
+                        lastProgressTime = now
+                        val normalizedProgress = (progress / 100f).coerceIn(0f, 1f)
+                        val downloaded = if (totalBytes > 0) (normalizedProgress * totalBytes).toLong() else 0L
+
+                        scope.launch {
+                            repository.updateProgress(task.id, normalizedProgress, speedText, downloaded, totalBytes)
+                        }
+                        DownloadNotificationHelper.showNotification(
+                            context,
+                            task.title,
+                            progress.toInt(),
+                            speedText,
+                            isPaused = false
+                        )
+                    }
+                }
+
+                // If yt-dlp didn't output Destination line, find the file created in targetDir
+                if (detectedFilePath.isBlank() || !File(detectedFilePath).exists()) {
+                    val matchingFiles = targetDir.listFiles { _, name ->
+                        name.startsWith("AB_${sanitizedTitle}_")
+                    }
+                    val newest = matchingFiles?.maxByOrNull { it.lastModified() }
+                    if (newest != null && newest.exists()) {
+                        detectedFilePath = newest.absolutePath
+                    }
+                }
+
+                targetPathOrUri = detectedFilePath
+                val writtenFile = File(targetPathOrUri)
+                if (writtenFile.exists()) {
+                    totalBytes = writtenFile.length()
+                    MediaStorageHelper.scanMediaFile(context, targetPathOrUri, mimeType)
+                }
+            }
 
             // Update to completed
             val completedTask = task.copy(
@@ -198,7 +253,7 @@ class DownloadEngine(
             )
             repository.updateTask(completedTask)
 
-            // Record in History (History persists even after file or card is deleted)
+            // Record in History
             repository.addHistory(
                 DownloadHistoryEntity(
                     id = "hist_${task.id}",
@@ -227,7 +282,7 @@ class DownloadEngine(
             repository.updateTask(
                 task.copy(
                     status = TaskStatus.FAILED,
-                    errorMessage = e.localizedMessage ?: "Network download failed"
+                    errorMessage = e.localizedMessage ?: "Download failed"
                 )
             )
             repository.addHistory(
@@ -241,11 +296,10 @@ class DownloadEngine(
                     mediaType = task.mediaType,
                     engineUsed = task.engineUsed,
                     timestamp = System.currentTimeMillis(),
-                    status = "Failed: ${e.localizedMessage}"
+                    status = "Failed: ${e.localizedMessage ?: "Unknown error"}"
                 )
             )
         } finally {
-            try { outputStream?.close() } catch (_: Exception) {}
             activeJobs.remove(task.id)
             if (activeJobs.isEmpty()) {
                 delay(1500)
@@ -296,51 +350,6 @@ class DownloadEngine(
                     isPaused = false
                 )
             }
-        }
-        output.flush()
-    }
-
-    private suspend fun fallbackSimulationDownload(
-        task: DownloadTaskEntity,
-        output: OutputStream,
-        initialDownloaded: Long,
-        totalBytes: Long
-    ) {
-        val steps = 25
-        val chunkSize = (totalBytes - initialDownloaded) / steps
-        val buffer = ByteArray(16 * 1024) { (it % 255).toByte() }
-        var current = initialDownloaded
-
-        for (step in 1..steps) {
-            if (!scope.isActive || pausedTasks.contains(task.id)) {
-                throw CancellationException()
-            }
-            // Check Wi-Fi constraint during active download
-            if (!settingsManager.isNetworkConstraintSatisfied()) {
-                pauseTask(task.id)
-                throw CancellationException()
-            }
-
-            val toWrite = chunkSize.coerceAtLeast(16 * 1024L)
-            var written = 0L
-            while (written < toWrite) {
-                output.write(buffer)
-                written += buffer.size
-            }
-            current += toWrite
-            val progress = (current.toFloat() / totalBytes).coerceIn(0f, 0.98f)
-            val speedMb = 2.4f + (step % 5) * 0.4f
-            val speedText = String.format("%.1f MB/s", speedMb)
-
-            repository.updateProgress(task.id, progress, speedText, current.coerceAtMost(totalBytes), totalBytes)
-            DownloadNotificationHelper.showNotification(
-                context,
-                task.title,
-                (progress * 100).roundToInt(),
-                speedText,
-                isPaused = false
-            )
-            delay(400)
         }
         output.flush()
     }

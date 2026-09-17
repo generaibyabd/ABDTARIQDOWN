@@ -29,6 +29,7 @@ data class DownloadTaskEntity(
     val platform: String,
     val mediaType: MediaType,
     val selectedQuality: String,
+    val formatId: String = "",
     val streamUrl: String,
     val status: TaskStatus = TaskStatus.QUEUED,
     val progress: Float = 0f,
