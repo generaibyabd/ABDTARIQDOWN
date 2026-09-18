@@ -59,8 +59,8 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                 body = "Network requests originate directly from your device to the target social media host platforms (e.g., YouTube, Instagram, TikTok, Twitter/X) to retrieve video streams and format information. These requests do not route through any intermediary proxy servers."
             )
             LegalSection(
-                title = "4. Third-Party Services (AdMob)",
-                body = "ABDownloader integrates Google AdMob for advertising. Google Mobile Ads may collect anonymized device identifiers and telemetry in accordance with Google's Privacy Policy."
+                title = "4. Zero Advertising or Tracking SDKs",
+                body = "ABDownloader contains zero advertising SDKs, tracking libraries, or telemetry frameworks. Your downloads and media remain entirely private on your device."
             )
         }
     }

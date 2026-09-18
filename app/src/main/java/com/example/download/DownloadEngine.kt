@@ -6,7 +6,9 @@ import com.example.data.db.DownloadTaskEntity
 import com.example.data.db.MediaType
 import com.example.data.db.TaskStatus
 import com.example.data.repository.DownloadRepository
+import com.example.engine.SupportedPlatform
 import com.example.settings.SettingsManager
+import com.example.storage.CookieManager
 import com.example.storage.MediaStorageHelper
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -172,6 +174,14 @@ class DownloadEngine(
                 val request = YoutubeDLRequest(task.originalUrl)
                 request.addOption("-o", templateFile.absolutePath)
 
+                // Pass login cookies if configured for platform
+                val platform = SupportedPlatform.detect(task.originalUrl)
+                val cookieManager = CookieManager.getInstance(context)
+                val cookieFile = cookieManager.getCookieFileForPlatform(platform)
+                if (cookieFile != null) {
+                    request.addOption("--cookies", cookieFile.absolutePath)
+                }
+
                 if (task.mediaType == MediaType.AUDIO) {
                     if (task.formatId.isNotBlank() && task.formatId != "best" && task.formatId != "bestaudio") {
                         request.addOption("-f", task.formatId)
@@ -310,10 +320,38 @@ class DownloadEngine(
         } catch (e: CancellationException) {
             // Task paused or cancelled
         } catch (e: Exception) {
+            val rawMsg = e.localizedMessage ?: "Download failed"
+            val lower = rawMsg.lowercase()
+            val isLoginOrRateLimit = lower.contains("login required") ||
+                    lower.contains("rate-limit") ||
+                    lower.contains("rate limit") ||
+                    lower.contains("sign in") ||
+                    lower.contains("log in") ||
+                    lower.contains("checkpoint_required") ||
+                    lower.contains("confirm you're not a robot") ||
+                    lower.contains("confirm you’re not a robot") ||
+                    lower.contains("confirm you're not a bot") ||
+                    lower.contains("confirm you’re not a bot") ||
+                    lower.contains("redirected to login") ||
+                    lower.contains("private account") ||
+                    lower.contains("429")
+
+            val platform = SupportedPlatform.detect(task.originalUrl)
+            val friendlyMsg = if (isLoginOrRateLimit && (platform == SupportedPlatform.INSTAGRAM || platform == SupportedPlatform.TIKTOK || platform == SupportedPlatform.TWITTER)) {
+                val cookieManager = CookieManager.getInstance(context)
+                if (!cookieManager.hasCookiesForPlatform(platform)) {
+                    "This content may require login. You can add your ${platform.displayName} cookies in Settings to fix this."
+                } else {
+                    rawMsg
+                }
+            } else {
+                rawMsg
+            }
+
             repository.updateTask(
                 task.copy(
                     status = TaskStatus.FAILED,
-                    errorMessage = e.localizedMessage ?: "Download failed"
+                    errorMessage = friendlyMsg
                 )
             )
             repository.addHistory(
@@ -327,7 +365,7 @@ class DownloadEngine(
                     mediaType = task.mediaType,
                     engineUsed = task.engineUsed,
                     timestamp = System.currentTimeMillis(),
-                    status = "Failed: ${e.localizedMessage ?: "Unknown error"}"
+                    status = "Failed: $friendlyMsg"
                 )
             )
         } finally {

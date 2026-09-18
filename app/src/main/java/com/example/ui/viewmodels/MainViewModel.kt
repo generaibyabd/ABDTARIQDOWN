@@ -10,7 +10,6 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ABDownloaderApplication
-import com.example.ads.AdMobManager
 import com.example.data.db.DownloadHistoryEntity
 import com.example.data.db.DownloadTaskEntity
 import com.example.data.db.MediaType
@@ -52,7 +51,13 @@ class MainViewModel(
     private val orchestrator: EngineOrchestrator = app.orchestrator
     val updateManager: EngineUpdateManager = app.updateManager
     val settingsManager: SettingsManager = app.settingsManager
+    val cookieManager: com.example.storage.CookieManager = app.cookieManager
     private val downloadEngine: DownloadEngine = app.downloadEngine
+
+    val cookieState: StateFlow<Map<String, Boolean>> = cookieManager.cookieState
+
+    private val _cookieActionFeedback = MutableStateFlow<String?>(null)
+    val cookieActionFeedback: StateFlow<String?> = _cookieActionFeedback.asStateFlow()
 
     // Navigation & Screen States
     private val _selectedTab = MutableStateFlow(0) // 0 = Home, 1 = Downloads, 2 = Settings
@@ -250,11 +255,6 @@ class MainViewModel(
 
     fun confirmDownload(activity: Activity?) {
         val media = _extractedMedia.value ?: return
-
-        // Interstitial ad shown after initiating download if preloaded (never blocks if not ready)
-        AdMobManager.showInterstitialIfReady(activity) {
-            // Proceed with download queueing
-        }
 
         viewModelScope.launch {
             if (media.isPlaylist) {
@@ -523,5 +523,39 @@ class MainViewModel(
 
     fun setWifiOnly(enabled: Boolean) {
         settingsManager.setWifiOnly(enabled)
+    }
+
+    fun importCookies(platformKey: String, uri: Uri) {
+        viewModelScope.launch {
+            val success = cookieManager.importCookies(platformKey, uri)
+            val displayName = when (platformKey.lowercase()) {
+                "instagram" -> "Instagram"
+                "tiktok" -> "TikTok"
+                "twitter" -> "X (Twitter)"
+                else -> platformKey.replaceFirstChar { it.uppercase() }
+            }
+            _cookieActionFeedback.value = if (success) {
+                "Cookies loaded successfully for $displayName"
+            } else {
+                "Failed to read cookies file for $displayName"
+            }
+        }
+    }
+
+    fun removeCookies(platformKey: String) {
+        viewModelScope.launch {
+            cookieManager.removeCookies(platformKey)
+            val displayName = when (platformKey.lowercase()) {
+                "instagram" -> "Instagram"
+                "tiktok" -> "TikTok"
+                "twitter" -> "X (Twitter)"
+                else -> platformKey.replaceFirstChar { it.uppercase() }
+            }
+            _cookieActionFeedback.value = "Cookies removed for $displayName"
+        }
+    }
+
+    fun clearCookieFeedback() {
+        _cookieActionFeedback.value = null
     }
 }

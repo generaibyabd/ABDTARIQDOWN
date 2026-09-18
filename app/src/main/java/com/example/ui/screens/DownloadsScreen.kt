@@ -66,7 +66,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.ads.AdMobBanner
 import com.example.data.db.DownloadTaskEntity
 import com.example.data.db.MediaType
 import com.example.ui.theme.AccentBlue
@@ -262,9 +261,6 @@ fun DownloadsScreen(viewModel: MainViewModel) {
                 }
             }
         }
-
-        // Section 14: Non-intrusive AdMob Banner at bottom
-        AdMobBanner(modifier = Modifier.padding(top = 4.dp))
     }
 }
 

@@ -4,8 +4,12 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,36 +24,49 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Policy
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ads.AdMobBanner
 import com.example.settings.AppThemeMode
 import com.example.ui.theme.AccentBlue
 import com.example.ui.viewmodels.MainViewModel
@@ -61,6 +78,26 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val themeMode by viewModel.themeMode.collectAsState()
     val wifiOnly by viewModel.wifiOnly.collectAsState()
     val updateState by viewModel.engineUpdateState.collectAsState()
+    val cookieState by viewModel.cookieState.collectAsState()
+    val cookieFeedback by viewModel.cookieActionFeedback.collectAsState()
+
+    var platformToImport by remember { mutableStateOf<String?>(null) }
+    val cookiePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        val platform = platformToImport
+        if (uri != null && platform != null) {
+            viewModel.importCookies(platform, uri)
+        }
+        platformToImport = null
+    }
+
+    LaunchedEffect(cookieFeedback) {
+        cookieFeedback?.let { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            viewModel.clearCookieFeedback()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -161,7 +198,56 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Section 3: History & Engines
+        // Section 3: Manage Login Cookies (Instagram, TikTok, X)
+        SettingsCard(title = "Manage Login Cookies") {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "Some platforms require you to be logged in to download certain content. This is optional — import your cookies only if you see login-related errors. Your cookies stay only on this device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                val cookiePlatforms = listOf(
+                    Triple("instagram", "Instagram", "Instagram posts, reels, and stories"),
+                    Triple("tiktok", "TikTok", "TikTok videos and audio tracks"),
+                    Triple("twitter", "X (Twitter)", "X / Twitter media and clips")
+                )
+
+                cookiePlatforms.forEachIndexed { index, (key, name, subtitle) ->
+                    val isConfigured = cookieState[key] == true
+                    CookiePlatformRow(
+                        platformKey = key,
+                        platformName = name,
+                        subtitle = subtitle,
+                        isConfigured = isConfigured,
+                        onImport = {
+                            platformToImport = key
+                            try {
+                                cookiePickerLauncher.launch(arrayOf("text/plain", "*/*"))
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Could not open file picker", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onRemove = {
+                            viewModel.removeCookies(key)
+                        }
+                    )
+                    if (index < cookiePlatforms.size - 1) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Section 4: History & Engines
         SettingsCard(title = "Data & Engine Maintenance") {
             SettingsRow(
                 icon = Icons.Default.History,
@@ -249,9 +335,6 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
         }
-
-        // Section 14: Non-intrusive AdMob Banner at bottom
-        AdMobBanner(modifier = Modifier.padding(top = 10.dp))
     }
 }
 
@@ -350,6 +433,106 @@ private fun SettingsRow(
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+@Composable
+private fun CookiePlatformRow(
+    platformKey: String,
+    platformName: String,
+    subtitle: String,
+    isConfigured: Boolean,
+    onImport: () -> Unit,
+    onRemove: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = platformName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                if (isConfigured) {
+                    Surface(
+                        color = Color(0xFF2E7D32).copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "Cookies Loaded",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF2E7D32),
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                } else {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "Not set",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                fontSize = 11.sp
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        if (isConfigured) {
+            OutlinedButton(
+                onClick = onImport,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.height(34.dp)
+            ) {
+                Text("Replace", fontSize = 12.sp)
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            IconButton(
+                onClick = onRemove,
+                modifier = Modifier.size(34.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Remove cookies for $platformName",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        } else {
+            Button(
+                onClick = onImport,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
+                modifier = Modifier.height(34.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.UploadFile,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Import", fontSize = 12.sp)
+            }
         }
     }
 }

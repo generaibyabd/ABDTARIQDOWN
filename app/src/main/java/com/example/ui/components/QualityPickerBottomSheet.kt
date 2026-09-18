@@ -261,9 +261,14 @@ fun QualityPickerBottomSheet(
                     ) {
                         media.videoFormats.forEach { format ->
                             val isSelected = selectedOption?.id == format.id
+                            val subtitleText = when {
+                                format.filesizeBytes > 0 -> formatFileSize(format.filesizeBytes)
+                                format.fps > 30 -> "${format.fps} FPS"
+                                else -> format.resolution
+                            }
                             QualityCell(
                                 label = format.qualityLabel,
-                                subtitle = if (format.filesizeBytes > 0) formatFileSize(format.filesizeBytes) else "${format.fps} FPS",
+                                subtitle = subtitleText,
                                 isSelected = isSelected,
                                 onClick = { onOptionSelected(format) }
                             )
@@ -301,9 +306,14 @@ fun QualityPickerBottomSheet(
                     ) {
                         media.audioFormats.forEach { format ->
                             val isSelected = selectedOption?.id == format.id
+                            val subtitleText = if (format.filesizeBytes > 0) {
+                                formatFileSize(format.filesizeBytes)
+                            } else {
+                                "Audio"
+                            }
                             QualityCell(
                                 label = format.qualityLabel,
-                                subtitle = format.resolution,
+                                subtitle = subtitleText,
                                 isSelected = isSelected,
                                 onClick = { onOptionSelected(format) }
                             )
