@@ -1,6 +1,7 @@
 package com.example
 
 import android.app.Application
+import com.example.ads.AdMobManager
 import com.example.data.db.AppDatabase
 import com.example.data.repository.DownloadRepository
 import com.example.download.DownloadEngine
@@ -54,6 +55,7 @@ class ABDownloaderApplication : Application() {
         downloadEngine = DownloadEngine(this, repository, settingsManager)
 
         DownloadNotificationHelper.createNotificationChannel(this)
+        AdMobManager.initialize(this)
 
         // Silent once-per-day check on launch and clean orphaned staging files
         CoroutineScope(Dispatchers.IO).launch {

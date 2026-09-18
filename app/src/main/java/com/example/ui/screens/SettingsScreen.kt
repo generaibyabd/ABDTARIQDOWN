@@ -67,6 +67,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ads.AdMobBanner
 import com.example.settings.AppThemeMode
 import com.example.ui.theme.AccentBlue
 import com.example.ui.viewmodels.MainViewModel
@@ -335,6 +336,9 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
         }
+
+        // Section 14: Non-intrusive AdMob Banner at bottom
+        AdMobBanner(modifier = Modifier.padding(top = 10.dp))
     }
 }
 

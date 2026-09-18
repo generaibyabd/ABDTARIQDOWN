@@ -109,7 +109,7 @@ dependencies {
   implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
   implementation(libs.androidx.work.runtime.ktx)
-  // implementation(libs.play.services.ads)
+  implementation(libs.play.services.ads)
   implementation(libs.converter.moshi)
 
   // Real yt-dlp on-device extraction & download engine

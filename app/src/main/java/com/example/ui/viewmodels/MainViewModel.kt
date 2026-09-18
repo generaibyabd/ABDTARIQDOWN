@@ -10,6 +10,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ABDownloaderApplication
+import com.example.ads.AdMobManager
 import com.example.data.db.DownloadHistoryEntity
 import com.example.data.db.DownloadTaskEntity
 import com.example.data.db.MediaType
@@ -255,6 +256,11 @@ class MainViewModel(
 
     fun confirmDownload(activity: Activity?) {
         val media = _extractedMedia.value ?: return
+
+        // Interstitial ad shown after initiating download if preloaded (never blocks if not ready)
+        AdMobManager.showInterstitialIfReady(activity) {
+            // Proceed with download queueing
+        }
 
         viewModelScope.launch {
             if (media.isPlaylist) {
