@@ -17,13 +17,14 @@ import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
 import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.MobileAds
+import com.google.android.gms.ads.RequestConfiguration
 import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 
 object AdMobManager {
-    // Official Google AdMob Test Ad Unit IDs
-    const val BANNER_TEST_ID = "ca-app-pub-3940256099942544/6300978111"
-    const val INTERSTITIAL_TEST_ID = "ca-app-pub-3940256099942544/1033173712"
+    // Production Google AdMob Ad Unit IDs
+    const val BANNER_AD_UNIT_ID = "ca-app-pub-6044304548635745/1572196371"
+    const val INTERSTITIAL_AD_UNIT_ID = "ca-app-pub-6044304548635745/6354196870"
 
     private const val TAG = "AdMobManager"
 
@@ -31,6 +32,16 @@ object AdMobManager {
     private var isLoadingInterstitial = false
 
     fun initialize(context: Context) {
+        // Test device safeguard: On the very first run with real ads, check logcat for
+        // "Use RequestConfiguration.Builder... to get test ads on this device" containing
+        // the hashed device ID. Add that hex string into this list to ensure ads on your
+        // development device are served as test ads, preventing accidental invalid traffic flags.
+        val testDeviceIds = listOf<String>() // e.g. listOf("YOUR_TEST_DEVICE_HASHED_ID")
+        val requestConfiguration = RequestConfiguration.Builder()
+            .setTestDeviceIds(testDeviceIds)
+            .build()
+        MobileAds.setRequestConfiguration(requestConfiguration)
+
         try {
             MobileAds.initialize(context) { status ->
                 Log.d(TAG, "AdMob SDK Initialized: ${status.adapterStatusMap}")
@@ -48,7 +59,7 @@ object AdMobManager {
         val adRequest = AdRequest.Builder().build()
         InterstitialAd.load(
             context,
-            INTERSTITIAL_TEST_ID,
+            INTERSTITIAL_AD_UNIT_ID,
             adRequest,
             object : InterstitialAdLoadCallback() {
                 override fun onAdLoaded(ad: InterstitialAd) {
@@ -92,7 +103,7 @@ object AdMobManager {
 @Composable
 fun AdMobBanner(
     modifier: Modifier = Modifier,
-    adUnitId: String = AdMobManager.BANNER_TEST_ID
+    adUnitId: String = AdMobManager.BANNER_AD_UNIT_ID
 ) {
     AndroidView(
         modifier = modifier

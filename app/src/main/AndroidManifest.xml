@@ -22,10 +22,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
 
-        <!-- Google AdMob Sample App ID (for development / testing) -->
+        <!-- Google AdMob Production App ID -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713" />
+            android:value="ca-app-pub-6044304548635745~4191067964" />
 
         <!-- Delay AdMob App Measurement initialization & optimize initialization -->
         <meta-data
