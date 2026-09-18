@@ -119,6 +119,8 @@ class MainViewModel(
     val wifiOnly: StateFlow<Boolean> = settingsManager.wifiOnly
     val engineUpdateState: StateFlow<EngineUpdateState> = updateManager.updateState
     val lastUsedEngine: StateFlow<String> = orchestrator.lastUsedEngine
+    val ytDlpVersion: String get() = orchestrator.ytDlpEngine.version
+    val newPipeVersion: String get() = orchestrator.newPipeEngine.version
 
     // UI Expansion & Selection in Downloads
     private val _expandedPlaylistIds = MutableStateFlow<Set<String>>(emptySet())

@@ -132,14 +132,14 @@ fun AppInfoScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     EngineRow(
                         name = "yt-dlp Engine",
-                        version = "v2025.02.19 (Python runtime + FFmpeg)",
+                        version = "v${viewModel.ytDlpVersion} (Python runtime + FFmpeg)",
                         role = "Multi-platform extractor supporting 1000+ sites (Instagram, TikTok, Twitter/X, Facebook, Reddit, Vimeo, SoundCloud)",
                         status = "Operational"
                     )
                     Spacer(modifier = Modifier.height(14.dp))
                     EngineRow(
                         name = "NewPipeExtractor Engine",
-                        version = "v0.24.3 (JitPack / Maven Central)",
+                        version = "v${viewModel.newPipeVersion} (JitPack / Maven Central)",
                         role = "Dedicated high-performance YouTube video & playlist parser for minimal extraction latency",
                         status = "Operational"
                     )

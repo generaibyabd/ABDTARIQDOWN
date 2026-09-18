@@ -268,6 +268,20 @@ fun SettingsScreen(viewModel: MainViewModel) {
                             color = AccentBlue,
                             strokeWidth = 2.dp
                         )
+                    } else if (updateState.updateAvailable) {
+                        val isFailed = updateState.statusMessage.contains("failed", ignoreCase = true)
+                        Button(
+                            onClick = {
+                                if (isFailed) viewModel.checkForUpdates() else viewModel.applyEngineUpdate()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isFailed) MaterialTheme.colorScheme.error else AccentBlue
+                            ),
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(if (isFailed) "Retry" else "Apply", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     } else {
                         Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }

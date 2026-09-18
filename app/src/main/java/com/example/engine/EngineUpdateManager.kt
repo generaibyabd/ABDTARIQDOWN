@@ -47,11 +47,24 @@ class EngineUpdateManager(
     }
 
     init {
-        // Load any previously applied in-place engine updates
+        // Load any previously applied in-place engine updates, verifying against real binary
+        val realBinaryVer = try {
+            com.yausername.youtubedl_android.YoutubeDL.getInstance().version(context)
+        } catch (_: Exception) { null }
+
         val ytdlpSaved = prefs.getString(KEY_YTDLP_OVERRIDE_VER, null)
         if (ytdlpSaved != null) {
-            orchestrator.ytDlpEngine.version = ytdlpSaved
+            // If binary is available and does not match the stored override, clear invalid override
+            if (realBinaryVer != null && realBinaryVer != ytdlpSaved) {
+                prefs.edit().remove(KEY_YTDLP_OVERRIDE_VER).apply()
+                orchestrator.ytDlpEngine.version = realBinaryVer
+            } else {
+                orchestrator.ytDlpEngine.version = ytdlpSaved
+            }
+        } else if (realBinaryVer != null) {
+            orchestrator.ytDlpEngine.version = realBinaryVer
         }
+
         val newPipeSaved = prefs.getString(KEY_NEWPIPE_OVERRIDE_VER, null)
         if (newPipeSaved != null) {
             orchestrator.newPipeEngine.version = newPipeSaved
@@ -184,32 +197,83 @@ class EngineUpdateManager(
         val state = _updateState.value
         if (!state.updateAvailable || !state.verificationPassed) return@withContext
 
+        _updateState.value = _updateState.value.copy(
+            isChecking = true,
+            statusMessage = "Downloading and applying ${state.candidateEngineName} update..."
+        )
+
         try {
             if (state.candidateEngineName == "yt-dlp") {
-                try {
-                    com.yausername.youtubedl_android.YoutubeDL.getInstance()
-                        .updateYoutubeDL(context, com.yausername.youtubedl_android.YoutubeDL.UpdateChannel.STABLE)
-                } catch (_: Exception) {}
+                val versionBeforeUpdate = try {
+                    com.yausername.youtubedl_android.YoutubeDL.getInstance().version(context)
+                } catch (_: Exception) { null } ?: orchestrator.ytDlpEngine.version
+
+                var updateError: Exception? = null
+                var attempt = 0
+                val maxAttempts = 2
+
+                while (attempt < maxAttempts) {
+                    attempt++
+                    try {
+                        com.yausername.youtubedl_android.YoutubeDL.getInstance()
+                            .updateYoutubeDL(context, com.yausername.youtubedl_android.YoutubeDL.UpdateChannel.STABLE)
+                        updateError = null
+                        break
+                    } catch (e: Exception) {
+                        updateError = e
+                        if (attempt < maxAttempts) {
+                            _updateState.value = _updateState.value.copy(
+                                statusMessage = "Retrying update in 3 seconds (attempt $attempt/$maxAttempts)..."
+                            )
+                            kotlinx.coroutines.delay(3000L)
+                        }
+                    }
+                }
+
                 val realVer = try {
                     com.yausername.youtubedl_android.YoutubeDL.getInstance().version(context)
-                } catch (_: Exception) { null } ?: state.candidateVersion
+                } catch (_: Exception) { null }
 
-                orchestrator.ytDlpEngine.version = realVer
-                orchestrator.newPipeEngine.version = realVer
-                prefs.edit().putString(KEY_YTDLP_OVERRIDE_VER, realVer).apply()
+                if (realVer != null && realVer != versionBeforeUpdate) {
+                    // Update actually succeeded
+                    orchestrator.ytDlpEngine.version = realVer
+                    orchestrator.newPipeEngine.version = realVer
+                    prefs.edit().putString(KEY_YTDLP_OVERRIDE_VER, realVer).apply()
+
+                    _updateState.value = _updateState.value.copy(
+                        isChecking = false,
+                        updateAvailable = false,
+                        isApplied = true,
+                        statusMessage = "Successfully updated yt-dlp to v$realVer in-place!"
+                    )
+                } else {
+                    // Binary was NOT updated
+                    val detail = updateError?.localizedMessage
+                        ?: if (realVer == versionBeforeUpdate) "Binary remained at v$versionBeforeUpdate" else "Could not verify binary"
+                    _updateState.value = _updateState.value.copy(
+                        isChecking = false,
+                        updateAvailable = true,
+                        isApplied = false,
+                        statusMessage = "Engine update failed ($detail). Tap to retry."
+                    )
+                }
             } else if (state.candidateEngineName == "NewPipeExtractor") {
                 orchestrator.newPipeEngine.version = state.candidateVersion
                 prefs.edit().putString(KEY_NEWPIPE_OVERRIDE_VER, state.candidateVersion).apply()
-            }
 
-            _updateState.value = _updateState.value.copy(
-                updateAvailable = false,
-                isApplied = true,
-                statusMessage = "Successfully updated ${state.candidateEngineName} to v${state.candidateVersion} in-place!"
-            )
+                _updateState.value = _updateState.value.copy(
+                    isChecking = false,
+                    updateAvailable = false,
+                    isApplied = true,
+                    statusMessage = "Successfully updated NewPipeExtractor to v${state.candidateVersion} in-place!"
+                )
+            }
         } catch (e: Exception) {
             _updateState.value = _updateState.value.copy(
-                statusMessage = "Engine update applied locally: ${e.localizedMessage}"
+                isChecking = false,
+                updateAvailable = true,
+                isApplied = false,
+                statusMessage = "Engine update failed: ${e.localizedMessage ?: "Unknown error"}. Tap to retry."
             )
         }
     }

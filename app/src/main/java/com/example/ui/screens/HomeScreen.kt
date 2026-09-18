@@ -131,12 +131,19 @@ fun HomeScreen(viewModel: MainViewModel) {
             enter = fadeIn(),
             exit = fadeOut()
         ) {
+            val isFailed = updateState.statusMessage.contains("failed", ignoreCase = true)
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 10.dp),
                 shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = AccentBlue.copy(alpha = 0.12f))
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isFailed) {
+                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+                    } else {
+                        AccentBlue.copy(alpha = 0.12f)
+                    }
+                )
             ) {
                 Row(
                     modifier = Modifier
@@ -145,18 +152,18 @@ fun HomeScreen(viewModel: MainViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.SystemUpdate,
+                        imageVector = if (isFailed) Icons.Default.ErrorOutline else Icons.Default.SystemUpdate,
                         contentDescription = null,
-                        tint = AccentBlue,
+                        tint = if (isFailed) MaterialTheme.colorScheme.error else AccentBlue,
                         modifier = Modifier.size(28.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Engine Update Available",
+                            text = if (isFailed) "Engine Update Failed" else "Engine Update Available",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = if (isFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = updateState.statusMessage,
@@ -164,13 +171,23 @@ fun HomeScreen(viewModel: MainViewModel) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Button(
-                        onClick = { viewModel.applyEngineUpdate() },
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Text("Apply", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    if (updateState.isChecking) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp,
+                            color = if (isFailed) MaterialTheme.colorScheme.error else AccentBlue
+                        )
+                    } else {
+                        Button(
+                            onClick = { viewModel.applyEngineUpdate() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isFailed) MaterialTheme.colorScheme.error else AccentBlue
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(if (isFailed) "Retry" else "Apply", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
