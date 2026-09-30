@@ -5,8 +5,6 @@ import com.abdeveloper.abdownloader.ABDownloaderApplication
 import com.abdeveloper.abdownloader.storage.CookieManager
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
-import com.yausername.youtubedl_android.mapper.VideoFormat
-import com.yausername.youtubedl_android.mapper.VideoInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -49,91 +47,123 @@ class YtDlpEngine(
                 return@withContext extractPlaylist(cleanUrl, platform)
             }
 
-            // Real single media extraction via YoutubeDL
-            val request = YoutubeDLRequest(cleanUrl)
-            request.addOption("--no-playlist")
+            // Real single media / photo post extraction via raw JSON dump
+            val jsonRequest = YoutubeDLRequest(cleanUrl)
+            jsonRequest.addOption("--no-playlist")
+            jsonRequest.addOption("-j") // dump single-line JSON to stdout, don't download
 
             // Pass login cookies if configured for platform
             val cookieFile = cookieManager.getCookieFileForPlatform(platform)
             if (cookieFile != null) {
-                request.addOption("--cookies", cookieFile.absolutePath)
+                jsonRequest.addOption("--cookies", cookieFile.absolutePath)
             }
 
-            val videoInfo: VideoInfo = YoutubeDL.getInstance().getInfo(request)
+            val rawJsonResponse = YoutubeDL.getInstance().execute(jsonRequest).out
+            val jsonLines = rawJsonResponse.trim().lineSequence()
+                .map { it.trim() }
+                .filter { it.startsWith("{") && it.endsWith("}") }
+                .toList()
 
-            val title = videoInfo.title?.ifBlank { null }
-                ?: videoInfo.fulltitle?.ifBlank { null }
-                ?: "${platform.displayName} Media"
-
-            val thumbnail = videoInfo.thumbnail.orEmpty()
-            val durationSeconds = videoInfo.duration.toLong()
-
-            val rawFormats: List<VideoFormat> = videoInfo.formats ?: emptyList()
-
-            // 1. Separate candidates
-            val rawVideoCandidates = mutableListOf<VideoCandidate>()
-            val rawAudioCandidates = mutableListOf<AudioCandidate>()
-
-            for (fmt in rawFormats) {
-                val formatId = fmt.formatId ?: continue
-                val ext = fmt.ext?.lowercase() ?: "mp4"
-                val vcodec = fmt.vcodec
-                val acodec = fmt.acodec
-
-                val hasVideo = vcodec != null && vcodec != "none"
-                val hasAudio = acodec != null && acodec != "none"
-                val isAudioOnly = !hasVideo && hasAudio
-                val isVideoOnly = hasVideo && !hasAudio
-                val isMuxed = hasVideo && hasAudio
-
-                val filesize = if (fmt.fileSize > 0) fmt.fileSize else fmt.fileSizeApproximate
-                val bitrate = if (fmt.tbr > 0) fmt.tbr else fmt.abr
-
-                if (isAudioOnly) {
-                    val rawBitrate = when {
-                        fmt.abr > 0 -> fmt.abr
-                        fmt.tbr > 0 -> fmt.tbr
-                        else -> 128
-                    }
-                    val roundedKbps = (((rawBitrate + 16) / 32) * 32).coerceAtLeast(64)
-                    rawAudioCandidates.add(
-                        AudioCandidate(
-                            fmt = fmt,
-                            formatId = formatId,
-                            ext = ext,
-                            rawBitrate = rawBitrate,
-                            roundedKbps = roundedKbps,
-                            filesize = filesize
-                        )
-                    )
-                } else if (isMuxed || isVideoOnly) {
-                    val effectiveHeight = when {
-                        fmt.height > 0 -> fmt.height
-                        videoInfo.height > 0 -> videoInfo.height
-                        else -> {
-                            val note = fmt.formatNote ?: fmt.format ?: ""
-                            Regex("(\\d{3,4})p?").find(note)?.groupValues?.get(1)?.toIntOrNull() ?: 720
-                        }
-                    }
-                    val fpsTier = if (fmt.fps > 30) fmt.fps.toInt() else 0
-                    rawVideoCandidates.add(
-                        VideoCandidate(
-                            fmt = fmt,
-                            formatId = formatId,
-                            ext = ext,
-                            effectiveHeight = effectiveHeight,
-                            fpsTier = fpsTier,
-                            bitrate = bitrate,
-                            filesize = filesize
-                        )
-                    )
+            val jsonObjects = jsonLines.mapNotNull { line ->
+                try {
+                    JSONObject(line)
+                } catch (_: Exception) {
+                    null
                 }
             }
 
-            // 2. Video quality tier grouping & container preference (prefer mp4, keep single best per tier)
+            val rootJson = jsonObjects.lastOrNull()
+                ?: JSONObject(rawJsonResponse.trim().lineSequence().last { it.isNotBlank() })
+
+            val title = rootJson.optString("title").ifBlank {
+                rootJson.optString("fulltitle")
+            }.ifBlank { "${platform.displayName} Media" }
+
+            var thumbnail = rootJson.optString("thumbnail")
+            val durationSeconds = rootJson.optLong("duration", 0L)
+
+            // Step 1: Detect photo/image posts across TikTok slideshows, Instagram carousels, Twitter photos, etc.
+            val detectedPhotos = extractPhotos(rootJson, jsonObjects, platform)
+
+            // Step 2: Parse raw formats for video and audio
+            val rawFormatsJson = rootJson.optJSONArray("formats")
+            val rawVideoCandidates = mutableListOf<VideoCandidate>()
+            val rawAudioCandidates = mutableListOf<AudioCandidate>()
+
+            if (rawFormatsJson != null) {
+                for (i in 0 until rawFormatsJson.length()) {
+                    val fmt = rawFormatsJson.optJSONObject(i) ?: continue
+                    val formatId = fmt.optString("format_id").ifBlank { continue }
+                    val ext = fmt.optString("ext", "mp4").lowercase()
+                    val vcodec = fmt.optString("vcodec", "")
+                    val acodec = fmt.optString("acodec", "")
+
+                    val hasVideo = vcodec.isNotBlank() && vcodec != "none"
+                    val hasAudio = acodec.isNotBlank() && acodec != "none"
+                    val isAudioOnly = !hasVideo && hasAudio
+                    val isVideoOnly = hasVideo && !hasAudio
+                    val isMuxed = hasVideo && hasAudio
+
+                    val filesize = when {
+                        fmt.optLong("filesize", 0L) > 0 -> fmt.optLong("filesize", 0L)
+                        fmt.optLong("filesize_approx", 0L) > 0 -> fmt.optLong("filesize_approx", 0L)
+                        else -> 0L
+                    }
+                    val tbr = fmt.optInt("tbr", 0)
+                    val abr = fmt.optInt("abr", 0)
+                    val bitrate = if (tbr > 0) tbr else abr
+                    val streamUrl = fmt.optString("url").ifBlank { cleanUrl }
+
+                    if (isAudioOnly) {
+                        val rawBitrate = when {
+                            abr > 0 -> abr
+                            tbr > 0 -> tbr
+                            else -> 128
+                        }
+                        val roundedKbps = (((rawBitrate + 16) / 32) * 32).coerceAtLeast(64)
+                        rawAudioCandidates.add(
+                            AudioCandidate(
+                                formatId = formatId,
+                                ext = ext,
+                                rawBitrate = rawBitrate,
+                                roundedKbps = roundedKbps,
+                                filesize = filesize,
+                                streamUrl = streamUrl
+                            )
+                        )
+                    } else if (isMuxed || isVideoOnly) {
+                        val h = fmt.optInt("height", 0)
+                        val rootH = rootJson.optInt("height", 0)
+                        val note = fmt.optString("format_note").ifBlank { fmt.optString("format") }
+                        val effectiveHeight = when {
+                            h > 0 -> h
+                            rootH > 0 -> rootH
+                            else -> Regex("(\\d{3,4})p?").find(note)?.groupValues?.get(1)?.toIntOrNull() ?: 720
+                        }
+                        val fpsVal = fmt.optInt("fps", 30)
+                        val fpsTier = if (fpsVal > 30) fpsVal else 0
+                        val width = fmt.optInt("width", 0)
+
+                        rawVideoCandidates.add(
+                            VideoCandidate(
+                                formatId = formatId,
+                                ext = ext,
+                                effectiveHeight = effectiveHeight,
+                                fpsTier = fpsTier,
+                                bitrate = bitrate,
+                                filesize = filesize,
+                                width = width,
+                                fps = fpsVal,
+                                streamUrl = streamUrl
+                            )
+                        )
+                    }
+                }
+            }
+
+            // Step 3: Video quality tier grouping & container preference (prefer mp4, keep single best per tier)
             val videosByTier = rawVideoCandidates.groupBy { "${it.effectiveHeight}_${it.fpsTier}" }
             val cleanVideoOptions = videosByTier.mapNotNull { (_, candidates) ->
-                // Within each tier key, prefer mp4: if at least one candidate has ext == "mp4", discard non-mp4
                 val hasMp4 = candidates.any { it.ext == "mp4" }
                 val containerFiltered = if (hasMp4) {
                     candidates.filter { it.ext == "mp4" }
@@ -141,30 +171,27 @@ class YtDlpEngine(
                     candidates
                 }
 
-                // Within each tier key, keep only single best candidate (highest bitrate, then largest filesize)
                 val best = containerFiltered.maxWithOrNull(
                     compareBy<VideoCandidate> { it.bitrate }.thenBy { it.filesize }
                 ) ?: return@mapNotNull null
 
-                val fmt = best.fmt
                 val height = best.effectiveHeight
                 val fpsTier = best.fpsTier
                 val ext = best.ext
 
-                // Label without FPS suffix when fpsTier == 0, and never saying "(Video Only)"
                 val baseLabel = if (fpsTier > 0) "${height}p ${fpsTier}FPS" else "${height}p"
                 val label = "$baseLabel ($ext)"
 
                 FormatOption(
                     id = best.formatId,
                     qualityLabel = label,
-                    resolution = if (fmt.width > 0 && height > 0) "${fmt.width}x$height" else "${height}p",
-                    fps = fmt.fps,
+                    resolution = if (best.width > 0 && height > 0) "${best.width}x$height" else "${height}p",
+                    fps = best.fps,
                     bitrateKbps = best.bitrate,
                     ext = ext,
                     filesizeBytes = best.filesize,
                     isAudio = false,
-                    streamUrl = fmt.url ?: cleanUrl
+                    streamUrl = best.streamUrl
                 )
             }.sortedWith(
                 compareByDescending<FormatOption> {
@@ -172,10 +199,9 @@ class YtDlpEngine(
                 }.thenByDescending { it.fps }
             )
 
-            // 3. Audio quality tier grouping & container preference (prefer m4a/mp3 over webm/opus, keep single best per tier)
+            // Step 4: Audio quality tier grouping & container preference (prefer m4a/mp3 over webm/opus)
             val audiosByTier = rawAudioCandidates.groupBy { it.roundedKbps }
             val cleanAudioOptions = audiosByTier.mapNotNull { (tierKbps, candidates) ->
-                // Prefer m4a / mp3 over webm / opus for consistent playback compatibility
                 val hasCompatible = candidates.any { it.ext == "m4a" || it.ext == "mp3" }
                 val containerFiltered = if (hasCompatible) {
                     candidates.filter { it.ext == "m4a" || it.ext == "mp3" }
@@ -187,7 +213,6 @@ class YtDlpEngine(
                     compareBy<AudioCandidate> { it.rawBitrate }.thenBy { it.filesize }
                 ) ?: return@mapNotNull null
 
-                val fmt = best.fmt
                 val ext = best.ext
                 val label = "$tierKbps kbps ($ext)"
 
@@ -200,28 +225,41 @@ class YtDlpEngine(
                     ext = ext,
                     filesizeBytes = best.filesize,
                     isAudio = true,
-                    streamUrl = fmt.url ?: cleanUrl
+                    streamUrl = best.streamUrl
                 )
             }.sortedByDescending { it.bitrateKbps }
 
-            // Fallback for direct media streams or simple sites where no specific format list was extracted:
-            val finalVideos = if (cleanVideoOptions.isEmpty() && cleanAudioOptions.isEmpty()) {
-                listOf(
-                    FormatOption(
-                        id = "best",
-                        qualityLabel = "Best Quality (${videoInfo.ext ?: "mp4"})",
-                        resolution = videoInfo.resolution ?: "Standard",
-                        fps = 30,
-                        bitrateKbps = 0,
-                        ext = videoInfo.ext ?: "mp4",
-                        filesizeBytes = if (videoInfo.fileSize > 0) videoInfo.fileSize else videoInfo.fileSizeApproximate,
-                        isAudio = false,
-                        streamUrl = videoInfo.url ?: cleanUrl
+            // Step 5: Check if this is a Photo Post
+            val isPhotoPost = detectedPhotos.isNotEmpty() && (
+                cleanVideoOptions.isEmpty() ||
+                platform == SupportedPlatform.TIKTOK ||
+                platform == SupportedPlatform.INSTAGRAM
+            )
+
+            val finalVideos = if (isPhotoPost) {
+                emptyList()
+            } else if (cleanVideoOptions.isEmpty() && cleanAudioOptions.isEmpty()) {
+                val directUrl = rootJson.optString("url")
+                val rootExt = rootJson.optString("ext", "mp4").lowercase()
+                val isExplicitImage = isImageUrl(directUrl) || rootExt in setOf("jpg", "jpeg", "png", "webp")
+                if (directUrl.isNotBlank() && !isExplicitImage) {
+                    listOf(
+                        FormatOption(
+                            id = "best",
+                            qualityLabel = "Best Quality ($rootExt)",
+                            resolution = rootJson.optString("resolution", "Standard"),
+                            fps = 30,
+                            bitrateKbps = 0,
+                            ext = rootExt,
+                            filesizeBytes = if (rootJson.optLong("filesize", 0L) > 0) rootJson.optLong("filesize", 0L) else rootJson.optLong("filesize_approx", 0L),
+                            isAudio = false,
+                            streamUrl = directUrl
+                        )
                     )
-                )
+                } else emptyList()
             } else cleanVideoOptions
 
-            val finalAudios = if (cleanAudioOptions.isEmpty() && finalVideos.isNotEmpty()) {
+            val finalAudios = if (!isPhotoPost && cleanAudioOptions.isEmpty() && finalVideos.isNotEmpty()) {
                 listOf(
                     FormatOption(
                         id = "bestaudio",
@@ -237,6 +275,15 @@ class YtDlpEngine(
                 )
             } else cleanAudioOptions
 
+            if (thumbnail.isBlank() && detectedPhotos.isNotEmpty()) {
+                thumbnail = detectedPhotos.first().url
+            }
+
+            // Step 6: Validate that media exists
+            if (finalVideos.isEmpty() && finalAudios.isEmpty() && detectedPhotos.isEmpty()) {
+                return@withContext ExtractionResult.Failure("No downloadable media found at this link")
+            }
+
             ExtractionResult.Success(
                 ExtractedMedia(
                     title = title,
@@ -246,10 +293,10 @@ class YtDlpEngine(
                     originalUrl = cleanUrl,
                     videoFormats = finalVideos,
                     audioFormats = finalAudios,
-                    photos = emptyList(),
+                    photos = if (isPhotoPost) detectedPhotos else emptyList(),
                     playlistVideos = emptyList(),
                     isPlaylist = false,
-                    isPhotoPost = false,
+                    isPhotoPost = isPhotoPost,
                     engineUsed = name
                 )
             )
@@ -337,8 +384,180 @@ class YtDlpEngine(
         }
     }
 
+    private fun extractPhotos(
+        rootJson: JSONObject,
+        jsonObjects: List<JSONObject>,
+        platform: SupportedPlatform
+    ): List<PhotoOption> {
+        val photoUrls = linkedSetOf<String>()
+
+        // 1. TikTok slideshow mode: rootJson.optJSONArray("images") or image_post_info.images
+        val tiktokImages = rootJson.optJSONArray("images")
+            ?: rootJson.optJSONObject("image_post_info")?.optJSONArray("images")
+        if (tiktokImages != null && tiktokImages.length() > 0) {
+            for (i in 0 until tiktokImages.length()) {
+                val item = tiktokImages.opt(i)
+                val url = extractImageUrlFromAny(item)
+                if (url.isNotBlank()) {
+                    photoUrls.add(url)
+                }
+            }
+        }
+
+        // 2. Multi-line JSON output (yt-dlp dumped multiple entries, e.g. Instagram carousel / tweet photos)
+        if (photoUrls.isEmpty() && jsonObjects.size > 1) {
+            for (obj in jsonObjects) {
+                val url = extractImageUrlFromObject(obj)
+                if (url.isNotBlank()) {
+                    photoUrls.add(url)
+                }
+            }
+        }
+
+        // 3. rootJson.optJSONArray("entries") (Instagram carousel, Reddit gallery)
+        if (photoUrls.isEmpty()) {
+            val entries = rootJson.optJSONArray("entries")
+            if (entries != null && entries.length() > 0) {
+                for (i in 0 until entries.length()) {
+                    val entryObj = entries.optJSONObject(i) ?: continue
+                    val url = extractImageUrlFromObject(entryObj)
+                    if (url.isNotBlank()) {
+                        photoUrls.add(url)
+                    }
+                }
+            }
+        }
+
+        // 4. Check if root is a single image or formats are strictly image formats
+        if (photoUrls.isEmpty()) {
+            val formats = rootJson.optJSONArray("formats")
+            val isVideo = rootJson.optBoolean("is_video", true)
+            val vcodec = rootJson.optString("vcodec", "")
+            val ext = rootJson.optString("ext", "").lowercase()
+            val isExplicitImageExt = ext in setOf("jpg", "jpeg", "png", "webp", "gif")
+
+            val hasOnlyImageFormats = if (formats != null && formats.length() > 0) {
+                var imageFmtCount = 0
+                var videoFmtCount = 0
+                for (i in 0 until formats.length()) {
+                    val fmt = formats.optJSONObject(i) ?: continue
+                    val fVcodec = fmt.optString("vcodec", "")
+                    val fExt = fmt.optString("ext", "").lowercase()
+                    if (fVcodec.isNotBlank() && fVcodec != "none") {
+                        videoFmtCount++
+                    } else if (fExt in setOf("jpg", "jpeg", "png", "webp")) {
+                        imageFmtCount++
+                    }
+                }
+                videoFmtCount == 0 && imageFmtCount > 0
+            } else false
+
+            if (isExplicitImageExt || hasOnlyImageFormats || (!isVideo && vcodec == "none")) {
+                val bestUrl = extractImageUrlFromObject(rootJson)
+                if (bestUrl.isNotBlank()) {
+                    photoUrls.add(bestUrl)
+                }
+            }
+        }
+
+        return photoUrls.mapIndexed { index, url ->
+            PhotoOption(
+                id = "photo_${index + 1}",
+                url = url,
+                previewUrl = url,
+                index = index + 1,
+                isSelected = true
+            )
+        }
+    }
+
+    private fun extractImageUrlFromAny(item: Any?): String {
+        return when (item) {
+            is String -> item.trim()
+            is JSONObject -> extractImageUrlFromObject(item)
+            else -> ""
+        }
+    }
+
+    private fun extractImageUrlFromObject(obj: JSONObject): String {
+        // 1. Direct url
+        val directUrl = obj.optString("url").trim()
+        val ext = obj.optString("ext").lowercase()
+        if (directUrl.isNotBlank() && (isImageUrl(directUrl) || ext in setOf("jpg", "jpeg", "png", "webp"))) {
+            return directUrl
+        }
+
+        // 2. url_list array (TikTok)
+        val urlList = obj.optJSONArray("url_list")
+        if (urlList != null && urlList.length() > 0) {
+            for (i in 0 until urlList.length()) {
+                val u = urlList.optString(i).trim()
+                if (u.isNotBlank()) return u
+            }
+        }
+
+        // 3. image_url or display_url
+        val imageUrl = obj.optString("image_url").trim()
+        if (imageUrl.isNotBlank()) return imageUrl
+        val displayUrl = obj.optString("display_url").trim()
+        if (displayUrl.isNotBlank()) return displayUrl
+
+        // 4. formats array (best image format)
+        val formats = obj.optJSONArray("formats")
+        if (formats != null && formats.length() > 0) {
+            var bestFmtUrl = ""
+            var maxRes = 0
+            for (i in 0 until formats.length()) {
+                val fmt = formats.optJSONObject(i) ?: continue
+                val fUrl = fmt.optString("url").trim()
+                val fExt = fmt.optString("ext").lowercase()
+                val fVcodec = fmt.optString("vcodec", "")
+                if (fUrl.isNotBlank() && (fExt in setOf("jpg", "jpeg", "png", "webp") || fVcodec == "none")) {
+                    val height = fmt.optInt("height", 0)
+                    val width = fmt.optInt("width", 0)
+                    val res = height * width
+                    if (res >= maxRes) {
+                        maxRes = res
+                        bestFmtUrl = fUrl
+                    }
+                }
+            }
+            if (bestFmtUrl.isNotBlank()) return bestFmtUrl
+        }
+
+        // 5. thumbnails array (highest resolution thumbnail)
+        val thumbnails = obj.optJSONArray("thumbnails")
+        if (thumbnails != null && thumbnails.length() > 0) {
+            var bestThumbUrl = ""
+            var maxPref = -1
+            for (i in 0 until thumbnails.length()) {
+                val t = thumbnails.optJSONObject(i) ?: continue
+                val tUrl = t.optString("url").trim()
+                val pref = t.optInt("preference", i)
+                if (tUrl.isNotBlank() && pref >= maxPref) {
+                    maxPref = pref
+                    bestThumbUrl = tUrl
+                }
+            }
+            if (bestThumbUrl.isNotBlank()) return bestThumbUrl
+        }
+
+        // 6. thumbnail string
+        val thumbnail = obj.optString("thumbnail").trim()
+        if (thumbnail.isNotBlank()) return thumbnail
+
+        return if (directUrl.isNotBlank()) directUrl else ""
+    }
+
+    private fun isImageUrl(url: String): Boolean {
+        val clean = url.lowercase().split("?").firstOrNull().orEmpty()
+        return clean.endsWith(".jpg") || clean.endsWith(".jpeg") ||
+                clean.endsWith(".png") || clean.endsWith(".webp") ||
+                clean.endsWith(".gif")
+    }
+
     private fun formatFriendlyError(e: Throwable, platform: SupportedPlatform, cookieManager: CookieManager): String {
-        val rawMessage = e.localizedMessage ?: e.message ?: "Failed to extract streams"
+        val rawMessage = e.localizedMessage ?: e.message ?: "Failed to extract media"
         val lower = rawMessage.lowercase()
 
         val isLoginOrRateLimit = lower.contains("login required") ||
@@ -357,7 +576,7 @@ class YtDlpEngine(
 
         if (isLoginOrRateLimit && (platform == SupportedPlatform.INSTAGRAM || platform == SupportedPlatform.TIKTOK || platform == SupportedPlatform.TWITTER)) {
             if (!cookieManager.hasCookiesForPlatform(platform)) {
-                return "This content may require login. You can add your ${platform.displayName} cookies in Settings to fix this."
+                return "This content may require login. You can log into your ${platform.displayName} account in Settings to fix this."
             }
         }
 
@@ -365,21 +584,23 @@ class YtDlpEngine(
     }
 
     private data class VideoCandidate(
-        val fmt: VideoFormat,
         val formatId: String,
         val ext: String,
         val effectiveHeight: Int,
         val fpsTier: Int,
         val bitrate: Int,
-        val filesize: Long
+        val filesize: Long,
+        val width: Int = 0,
+        val fps: Int = 30,
+        val streamUrl: String
     )
 
     private data class AudioCandidate(
-        val fmt: VideoFormat,
         val formatId: String,
         val ext: String,
         val rawBitrate: Int,
         val roundedKbps: Int,
-        val filesize: Long
+        val filesize: Long,
+        val streamUrl: String
     )
 }

@@ -41,7 +41,8 @@ enum class SubScreen {
     HISTORY,
     APP_INFO,
     PRIVACY_POLICY,
-    TERMS_OF_USE
+    TERMS_OF_USE,
+    LOGIN_WEBVIEW
 }
 
 class MainViewModel(
@@ -59,6 +60,9 @@ class MainViewModel(
 
     private val _cookieActionFeedback = MutableStateFlow<String?>(null)
     val cookieActionFeedback: StateFlow<String?> = _cookieActionFeedback.asStateFlow()
+
+    private val _loginPlatform = MutableStateFlow<String?>("instagram")
+    val loginPlatform: StateFlow<String?> = _loginPlatform.asStateFlow()
 
     // Navigation & Screen States
     private val _selectedTab = MutableStateFlow(0) // 0 = Home, 1 = Downloads, 2 = Settings
@@ -531,6 +535,28 @@ class MainViewModel(
 
     fun setWifiOnly(enabled: Boolean) {
         settingsManager.setWifiOnly(enabled)
+    }
+
+    fun openLoginWebView(platformKey: String) {
+        _loginPlatform.value = platformKey
+        _currentSubScreen.value = SubScreen.LOGIN_WEBVIEW
+    }
+
+    fun saveWebViewCookies(platformKey: String, domain: String, rawCookie: String) {
+        viewModelScope.launch {
+            val success = cookieManager.saveNetscapeCookies(platformKey, domain, rawCookie)
+            val displayName = when (platformKey.lowercase()) {
+                "instagram" -> "Instagram"
+                "tiktok" -> "TikTok"
+                "twitter" -> "X (Twitter)"
+                else -> platformKey.replaceFirstChar { it.uppercase() }
+            }
+            _cookieActionFeedback.value = if (success) {
+                "Logged in to $displayName successfully"
+            } else {
+                "Failed to save login session for $displayName"
+            }
+        }
     }
 
     fun importCookies(platformKey: String, uri: Uri) {

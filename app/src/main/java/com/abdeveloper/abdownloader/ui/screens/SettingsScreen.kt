@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
@@ -30,6 +32,9 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Login
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Policy
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.UploadFile
@@ -39,6 +44,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -200,10 +207,10 @@ fun SettingsScreen(viewModel: MainViewModel) {
         Spacer(modifier = Modifier.height(14.dp))
 
         // Section 3: Manage Login Cookies (Instagram, TikTok, X)
-        SettingsCard(title = "Manage Login Cookies") {
+        SettingsCard(title = "Account Logins & Cookies") {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "Some platforms require you to be logged in to download certain content. This is optional — import your cookies only if you see login-related errors. Your cookies stay only on this device.",
+                    text = "Some platforms require you to be logged in to download private content, high-resolution stories, or reels. Tap 'Log in' to securely authenticate in-app. Your session cookies stay strictly on this device.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 18.sp
@@ -212,9 +219,9 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 Spacer(modifier = Modifier.height(14.dp))
 
                 val cookiePlatforms = listOf(
-                    Triple("instagram", "Instagram", "Instagram posts, reels, and stories"),
-                    Triple("tiktok", "TikTok", "TikTok videos and audio tracks"),
-                    Triple("twitter", "X (Twitter)", "X / Twitter media and clips")
+                    Triple("instagram", "Instagram", "Reels, stories, posts, and audio"),
+                    Triple("tiktok", "TikTok", "Slideshows, clips, and sound tracks"),
+                    Triple("twitter", "X (Twitter)", "Tweets, clips, and photo carousels")
                 )
 
                 cookiePlatforms.forEachIndexed { index, (key, name, subtitle) ->
@@ -224,6 +231,12 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         platformName = name,
                         subtitle = subtitle,
                         isConfigured = isConfigured,
+                        onLogin = {
+                            viewModel.openLoginWebView(key)
+                        },
+                        onLogout = {
+                            viewModel.removeCookies(key)
+                        },
                         onImport = {
                             platformToImport = key
                             try {
@@ -231,14 +244,11 @@ fun SettingsScreen(viewModel: MainViewModel) {
                             } catch (_: Exception) {
                                 Toast.makeText(context, "Could not open file picker", Toast.LENGTH_SHORT).show()
                             }
-                        },
-                        onRemove = {
-                            viewModel.removeCookies(key)
                         }
                     )
                     if (index < cookiePlatforms.size - 1) {
                         HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 10.dp),
+                            modifier = Modifier.padding(vertical = 12.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                         )
                     }
@@ -461,9 +471,12 @@ private fun CookiePlatformRow(
     platformName: String,
     subtitle: String,
     isConfigured: Boolean,
-    onImport: () -> Unit,
-    onRemove: () -> Unit
+    onLogin: () -> Unit,
+    onLogout: () -> Unit,
+    onImport: () -> Unit
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
@@ -482,13 +495,24 @@ private fun CookiePlatformRow(
                         color = Color(0xFF2E7D32).copy(alpha = 0.15f),
                         shape = RoundedCornerShape(6.dp)
                     ) {
-                        Text(
-                            text = "Cookies Loaded",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF2E7D32),
-                            fontWeight = FontWeight.Bold,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color(0xFF2E7D32),
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "Logged in",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF2E7D32),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 } else {
                     Surface(
@@ -496,7 +520,7 @@ private fun CookiePlatformRow(
                         shape = RoundedCornerShape(6.dp)
                     ) {
                         Text(
-                            text = "Not set",
+                            text = "Not logged in",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -516,40 +540,95 @@ private fun CookiePlatformRow(
 
         if (isConfigured) {
             OutlinedButton(
-                onClick = onImport,
+                onClick = onLogout,
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.height(34.dp)
             ) {
-                Text("Replace", fontSize = 12.sp)
-            }
-            Spacer(modifier = Modifier.width(4.dp))
-            IconButton(
-                onClick = onRemove,
-                modifier = Modifier.size(34.dp)
-            ) {
                 Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = "Remove cookies for $platformName",
+                    imageVector = Icons.Default.Logout,
+                    contentDescription = null,
                     tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(14.dp)
                 )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Log out", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+            }
+
+            Box {
+                IconButton(
+                    onClick = { showMenu = true },
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "More options",
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Re-login via WebView", fontSize = 13.sp) },
+                        leadingIcon = { Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        onClick = {
+                            showMenu = false
+                            onLogin()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Import cookies.txt file", fontSize = 13.sp) },
+                        leadingIcon = { Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        onClick = {
+                            showMenu = false
+                            onImport()
+                        }
+                    )
+                }
             }
         } else {
             Button(
-                onClick = onImport,
+                onClick = onLogin,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
                 modifier = Modifier.height(34.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.UploadFile,
+                    imageVector = Icons.Default.Login,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(15.dp)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Import", fontSize = 12.sp)
+                Text("Log in", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+
+            Box {
+                IconButton(
+                    onClick = { showMenu = true },
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Advanced options",
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Import cookies.txt file", fontSize = 13.sp) },
+                        leadingIcon = { Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        onClick = {
+                            showMenu = false
+                            onImport()
+                        }
+                    )
+                }
             }
         }
     }

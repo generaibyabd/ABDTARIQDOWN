@@ -221,6 +221,14 @@ fun MainAppScreen(
                         onBack = { viewModel.navigateToSubScreen(null) }
                     )
                 }
+                SubScreen.LOGIN_WEBVIEW -> {
+                    val loginPlatform by viewModel.loginPlatform.collectAsState()
+                    com.abdeveloper.abdownloader.ui.screens.LoginWebViewScreen(
+                        platformKey = loginPlatform ?: "instagram",
+                        viewModel = viewModel,
+                        onBack = { viewModel.navigateToSubScreen(null) }
+                    )
+                }
                 null -> {
                     // Top-Level Tabs
                     when (selectedTab) {
